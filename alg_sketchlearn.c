@@ -761,7 +761,7 @@ unsigned long SKL_Identify_Thresh(SketchLearn_t* skl, double ratio,
     return ret;
 }  
 
-void SKL_Print(SketchLearn_t* skl, const char* filename) {
+void SKL_Print_Txt(SketchLearn_t* skl, const char* filename) {
 	FILE* fp;
 
 	fp = fopen(filename, "w");
@@ -777,6 +777,22 @@ void SKL_Print(SketchLearn_t* skl, const char* filename) {
 	fclose(fp);
 }
 
+// 用二进制格式输出Sketch至文件。仅输出计数器值。
+void SKL_Print_Bin(SketchLearn_t* skl, const char* filename){
+    FILE *fp;
+    fp = fopen(filename, "wb");
+    fwrite(&(skl->depth), sizeof(skl->depth), 1, fp);
+    fwrite(&(skl->width), sizeof(skl->width), 1, fp);
+    for (int i=0; i<skl->size; i++) {
+        fwrite(skl->counts[i], sizeof(skl->counts[i][0]), 2*skl->lgn + 1, fp);
+    }
+    fclose(fp);
+}
+
+void SKL_Print(SketchLearn_t* skl, const char* filename){
+    SKL_Print_Bin(skl, filename);
+}
+
 void SKL_GetMatrix(SketchLearn_t* skl, double** D) {
     for (uint64_t i=0; i<skl->width; i++) {
         for (uint64_t j=0; j<skl->depth; j++) {
@@ -788,7 +804,7 @@ void SKL_GetMatrix(SketchLearn_t* skl, double** D) {
     }
 }
 
-void SKL_ReadFile(SketchLearn_t* skl, const char* filename) {
+void SKL_ReadFile_Txt(SketchLearn_t* skl, const char* filename) {
     int line = 0;
     int row, col;
     char tmp[100];
@@ -873,6 +889,37 @@ void SKL_ReadFile_Onerow(SketchLearn_t* skl, const char* filename, int row) {
         }
     }
 	fclose(fp);
+}
+
+// 从二进制文件中读取Sketch。
+void SKL_ReadFile_Bin(SketchLearn_t* skl, const char* filename) {
+    FILE *fp;
+    fp = fopen(filename, "rb");
+    uint64_t depth;
+    uint64_t width;
+    size_t ret = 0;
+    ret += fread(&depth, sizeof(uint64_t), 1, fp);
+    ret += fread(&width, sizeof(uint64_t), 1, fp);
+    if (ret != 2) {
+        LOG_ERR("read size failed.\n");
+    }
+    if (depth != skl->depth || width != skl->width) {
+        fprintf(stderr, "size unmatch: config %lu %lu, actual %lu %lu\n",
+                skl->width, skl->depth,
+                width, depth);
+        exit(-1);
+    }
+    for(int i=0; i<skl->size; i++) {
+        ret = fread(skl->counts[i], sizeof(skl->counts[i][0]), 2*skl->lgn + 1, fp);
+        if((int)ret < 2*skl->lgn + 1) {
+            LOG_ERR("failed to read sketch in index %d.\n", i);
+        }
+    }
+    fclose(fp);
+}
+
+void SKL_ReadFile(SketchLearn_t* skl, const char* filename) {
+    SKL_ReadFile_Bin(skl, filename);
 }
 
 void SKL_Reset(SketchLearn_t* skl) {
