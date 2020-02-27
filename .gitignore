@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+controller
+dp_ovs
+dp_simulate
+trace_preprocess
+true_flows
+
+/data

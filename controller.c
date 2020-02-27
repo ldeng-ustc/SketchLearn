@@ -16,6 +16,7 @@
 #include "alg_sketchlearn.h"
 #include "config.h"
 #include "cpu.h"
+#include "stat.h"
 
 #include "hash.h"
 #include "alg_keytbl.h"
@@ -363,33 +364,44 @@ void evaluate() {
 }
 
 void preload() {
+    stat_t stat = {0, 0, 0};
     int n_interval = conf_common_num_interval(conf);
     int width = conf_skl_width(conf);
     int depth = conf_skl_depth(conf);
     int key_len = conf_common_key_len(conf);
     SketchLearn_t ** skl_list;
-    skl_list = calloc(n_interval, sizeof(SketchLearn_t *));
+    skl_list = (SketchLearn_t **)calloc(n_interval, sizeof(SketchLearn_t *));
     for(int i=0; i<n_interval; i++) {
         skl_list[i] = SKL_Init(width, depth, key_len);
     }
     
+    uint64_t st = now_us();
     for(int i=0; i<n_interval; i++) {
         char tmp[100];
         sprintf(tmp, "%s/sketches/%s_%d", conf_common_trace_dir(conf), alg, i);
         SKL_ReadFile(skl_list[i], tmp);
     }
+    stat.time_load = now_us() - st;
 
     int n_all_detect = 0;
     tuple_t* list_all_detect = (tuple_t*)calloc(max_ret, sizeof(tuple_t));
 
+    st = now_us();
     for(int i=0; i<n_interval; i++) {
-        do_inference(skl_list[i], list_all_detect, n_all_detect);
+        do_inference(skl_list[i], list_all_detect, &n_all_detect);
     }
+    stat.time_infer = now_us() - st;
+
+    char tmp[100];
+    sprintf(tmp, "%s/stat/preload_%d", conf_common_trace_dir(conf), n_interval);
+    FILE *fp = fopen(tmp, "w");
+    stat_print(&stat, fp);
+    fclose(fp);
 }
 
-void load_on_need() {
+void load_on_infer() {
+    stat_t stat = {0, 0, 0};
     int n_interval = conf_common_num_interval(conf);
-
     int width = conf_skl_width(conf);
     int depth = conf_skl_depth(conf);
     int key_len = conf_common_key_len(conf);
@@ -400,14 +412,75 @@ void load_on_need() {
 
     char tmp[100];
     for (int i=0; i<n_interval; i++) {
+        uint64_t st = now_us();
         sprintf(tmp, "%s/sketches/%s_%d", conf_common_trace_dir(conf), alg, i);
         SKL_ReadFile(skl, tmp);
+        stat.time_load += now_us() - st;
 
+        st = now_us();
         n_all_detect = 0;
-        uint64_t time = do_inference(skl, list_all_detect, &n_all_detect);
+        do_inference(skl, list_all_detect, &n_all_detect);
+        stat.time_infer += now_us() - st;
     }
     free(list_all_detect);
     SKL_Destroy(skl);
+
+    sprintf(tmp, "%s/stat/load_on_infer_%d", conf_common_trace_dir(conf), n_interval);
+    FILE *fp = fopen(tmp, "w");
+    stat_print(&stat, fp);
+    fclose(fp);
+
+}
+
+void test_read(int n) {
+    int width = conf_skl_width(conf);
+    int depth = conf_skl_depth(conf);
+    int key_len = conf_common_key_len(conf);
+    SketchLearn_t *skl = SKL_Init(width, depth, key_len);
+    char tmp[100];
+    sprintf(tmp, "%s/sketches/%s_0", conf_common_trace_dir(conf), alg);
+    uint64_t *times;
+    times = (uint64_t *)calloc(n + 1, sizeof(uint64_t));
+    times[0] = now_us();
+    for(int i=0; i<n; i++){
+        SKL_ReadFile(skl, tmp);
+        times[i+1] = now_us();
+    }
+
+    sprintf(tmp, "%s/stat/read", conf_common_trace_dir(conf));
+    FILE *fp = fopen(tmp, "w");
+    fprintf(fp, "Avg: %lu\n", (times[n] - times[0])/n);
+    for(int i=0; i<n; i++) {
+        fprintf(fp, "%d: %lu\n", i+1, times[i+1] - times[i]);
+    }
+    fclose(fp);
+}
+
+void test_write(int n) {
+    int width = conf_skl_width(conf);
+    int depth = conf_skl_depth(conf);
+    int key_len = conf_common_key_len(conf);
+    SketchLearn_t *skl = SKL_Init(width, depth, key_len);
+    char tmp[100];
+    sprintf(tmp, "%s/sketches/%s_0", conf_common_trace_dir(conf), alg);
+    SKL_ReadFile(skl, tmp);
+
+    uint64_t *times;
+    times = (uint64_t *)calloc(n + 1, sizeof(uint64_t));
+    times[0] = now_us();
+    for(int i=0; i<n; i++){
+        sprintf(tmp, "%s/write/write_%d", conf_common_trace_dir(conf), i);
+        SKL_Print(skl, tmp);
+        times[i+1] = now_us();
+    }
+
+    sprintf(tmp, "%s/stat/write", conf_common_trace_dir(conf));
+    FILE *fp = fopen(tmp, "w");
+    fprintf(fp, "Avg: %lu\n", (times[n] - times[0])/n);
+    for(int i=0; i<n; i++) {
+        fprintf(fp, "%d: %lu\n", i+1, times[i+1] - times[i]);
+    }
+    fclose(fp);
 }
 
 int main (int argc, char *argv []) {
@@ -429,6 +502,12 @@ int main (int argc, char *argv []) {
     sprintf(tmp, "%s/controller", conf_common_trace_dir(conf));
     mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
+    sprintf(tmp, "%s/stat", conf_common_trace_dir(conf));
+    mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+    sprintf(tmp, "%s/write", conf_common_trace_dir(conf));
+    mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
     while(1) {
         printf("controller >> ");
         fflush(stdout);
@@ -437,15 +516,32 @@ int main (int argc, char *argv []) {
         if(fgets(tmp, 100, stdin) == NULL){
             break;
         }
-        sprintf(tmp, "%s", cmd);
+        sscanf(tmp, "%s", cmd);
+        //puts(cmd);
         if (strcmp(cmd, "evaluation") == 0) {
             evaluate();
         }
         else if(strcmp(cmd, "test-preload") == 0) {
+            LOG_MSG("test preload...\n");
             preload();
         }
-        else if(strcmp(cmd, "test-load-on-need") == 0){
-            load_on_need();
+        else if(strcmp(cmd, "test-load-on-infer") == 0){
+            LOG_MSG("test load-on-infer...\n");
+            load_on_infer();
+        }
+        else if(strcmp(cmd, "test-read") == 0) {
+            LOG_MSG("test read sketchs...\n");
+            test_read(100);
+        }
+        else if(strcmp(cmd, "test-write") == 0) {
+            LOG_MSG("test write sketchs...\n");
+            test_write(100);
+        }
+        else if(strcmp(cmd, "exit") == 0){
+            break;
+        }
+        else {
+            LOG_MSG("unknown command.\n");
         }
         
     }
