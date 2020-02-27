@@ -432,30 +432,6 @@ void load_on_infer() {
 
 }
 
-void test_read(int n) {
-    int width = conf_skl_width(conf);
-    int depth = conf_skl_depth(conf);
-    int key_len = conf_common_key_len(conf);
-    SketchLearn_t *skl = SKL_Init(width, depth, key_len);
-    char tmp[100];
-    sprintf(tmp, "%s/sketches/%s_0", conf_common_trace_dir(conf), alg);
-    uint64_t *times;
-    times = (uint64_t *)calloc(n + 1, sizeof(uint64_t));
-    times[0] = now_us();
-    for(int i=0; i<n; i++){
-        SKL_ReadFile(skl, tmp);
-        times[i+1] = now_us();
-    }
-
-    sprintf(tmp, "%s/stat/read", conf_common_trace_dir(conf));
-    FILE *fp = fopen(tmp, "w");
-    fprintf(fp, "Avg: %lu\n", (times[n] - times[0])/n);
-    for(int i=0; i<n; i++) {
-        fprintf(fp, "%d: %lu\n", i+1, times[i+1] - times[i]);
-    }
-    fclose(fp);
-}
-
 void test_write(int n) {
     int width = conf_skl_width(conf);
     int depth = conf_skl_depth(conf);
@@ -478,7 +454,32 @@ void test_write(int n) {
     FILE *fp = fopen(tmp, "w");
     fprintf(fp, "Avg: %lu\n", (times[n] - times[0])/n);
     for(int i=0; i<n; i++) {
-        fprintf(fp, "%d: %lu\n", i+1, times[i+1] - times[i]);
+        fprintf(fp, "%d\t%lu\n", i+1, times[i+1] - times[i]);
+    }
+    fclose(fp);
+}
+
+void test_read(int n) {
+    test_write(n);
+    int width = conf_skl_width(conf);
+    int depth = conf_skl_depth(conf);
+    int key_len = conf_common_key_len(conf);
+    SketchLearn_t *skl = SKL_Init(width, depth, key_len);
+    char tmp[100];
+    uint64_t *times;
+    times = (uint64_t *)calloc(n + 1, sizeof(uint64_t));
+    times[0] = now_us();
+    for(int i=0; i<n; i++){
+        sprintf(tmp, "%s/write/write_%d", conf_common_trace_dir(conf), i);
+        SKL_ReadFile(skl, tmp);
+        times[i+1] = now_us();
+    }
+
+    sprintf(tmp, "%s/stat/read", conf_common_trace_dir(conf));
+    FILE *fp = fopen(tmp, "w");
+    fprintf(fp, "Avg: %lu\n", (times[n] - times[0])/n);
+    for(int i=0; i<n; i++) {
+        fprintf(fp, "%d\t%lu\n", i+1, times[i+1] - times[i]);
     }
     fclose(fp);
 }
@@ -531,11 +532,11 @@ int main (int argc, char *argv []) {
         }
         else if(strcmp(cmd, "test-read") == 0) {
             LOG_MSG("test read sketchs...\n");
-            test_read(100);
+            test_read(200);
         }
         else if(strcmp(cmd, "test-write") == 0) {
             LOG_MSG("test write sketchs...\n");
-            test_write(100);
+            test_write(200);
         }
         else if(strcmp(cmd, "exit") == 0){
             break;
